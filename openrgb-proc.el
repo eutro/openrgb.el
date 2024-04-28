@@ -83,14 +83,6 @@ device index to include."
 (defvar-local openrgb-packet-handled nil
   "Set to non-nil if the packet in `openrgb-packet-callbacks' has been handled.")
 
-(defun openrgb-current-proto-ver ()
-  "Get the current protocol version."
-  openrgb--current-proto-version)
-
-(defun openrgb-process-p (proc)
-  "Return non-nil of PROC is an OpenRGB connection."
-  (process-get proc 'openrgb))
-
 (defun openrgb--proc-log (proc level fmt &rest args)
   "Log a message in PROC's buffer, at LEVEL, as if by `(format FMT &rest ARGS)'."
   (with-current-buffer

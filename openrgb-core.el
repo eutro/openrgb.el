@@ -71,10 +71,17 @@
 (defconst openrgb-supported-proto-version 3
   "The maximum protocol version supported by this package.")
 
+(defun openrgb-current-proto-ver ()
+  "Get the current protocol version."
+  (bound-and-true-p openrgb--current-proto-version))
+
+(defun openrgb-process-p (proc)
+  "Return non-nil of PROC is an OpenRGB connection."
+  (process-get proc 'openrgb))
+
 (declare-function openrgb--proc-recv "openrgb-proc")
 (declare-function openrgb--proc-send "openrgb-proc")
 (declare-function openrgb--proc-log "openrgb-proc")
-(declare-function openrgb-current-proto-ver "openrgb-proc")
 (defalias 'openrgb-log #'openrgb--proc-log)
 (defalias 'openrgb--recv #'openrgb--proc-recv)
 (defalias 'openrgb--send #'openrgb--proc-send)

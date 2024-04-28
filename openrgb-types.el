@@ -26,9 +26,9 @@
 
 ;;; Code:
 
-(require 'openrgb-core)
-(eval-when-compile
+(eval-and-compile
   (require 'openrgb-macs))
+(require 'openrgb-core)
 (require 'bindat)
 (require 'cl-lib)
 (require 'dash)
