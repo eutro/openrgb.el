@@ -30,18 +30,26 @@
 
 ;; A low-level OpenRGB client for Emacs.
 ;;
-;; In short:
-;; - Server connections can be made with `openrgb-connect',
-;;   and reconnected with `openrgb-reconnect'.
-;; - Messages can be sent with the packet definitions in `openrgb-packets'.
-;; - Messages that are sent from the server unprompted (and otherwise) can be
-;;   received by setting `openrgb-packet-callbacks', currently this is only
-;;
-;; Some values sent or returned from packets are integers that are
-;; enumerations or bit masks, conversions for these can be found in
-;; `openrgb-constants'.
+;; Control an OpenRGB server using its binary network protocol,
+;; allowing for efficient bulk device management.
 
 ;;; Code:
+
+;; In short:
+;;
+;; - Server connections can be made with `openrgb-connect',
+;;   and reconnected with `openrgb-reconnect'.
+;;
+;; - Messages can be sent with the packet definitions in `openrgb-packets'.
+;;
+;; - Messages that are sent from the server unprompted (and otherwise) can be
+;;   received by setting `openrgb-packet-callbacks', currently the only packet
+;;   the server sends unprompted is the empty `NET_PACKET_ID_DEVICE_LIST_UPDATED'
+;;   with id 100.
+;;
+;; - Some values sent or returned from packets are integers that are
+;;   enumerations or bit masks, conversions for these can be found in
+;;   `openrgb-constants'.
 
 (require 'openrgb-core)
 (require 'openrgb-proc)
