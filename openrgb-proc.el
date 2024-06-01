@@ -34,6 +34,17 @@
 (require 'bindat)
 (require 'openrgb-types)
 
+(defcustom openrgb-default-host 'local
+  "The default host for `openrgb-connect'."
+  :group 'openrgb
+  :type '(choice (const :tag "Localhost" :value local)
+                 (string :tag "IP Address")))
+
+(defcustom openrgb-default-port 6742
+  "The default port for `openrgb-connect'."
+  :group 'openrgb
+  :type '(integer))
+
 (defun openrgb-packet-has-id (packet id)
   "Return non-nil if PACKET's ID matches."
   (equal id (alist-get 'id packet)))
@@ -44,17 +55,20 @@
 TYPE is a `bindat' type.
 
 Returns an `promise' with the value."
-  (promise-then
-   (openrgb--pop-packet proc #'openrgb-packet-has-id id)
-   (lambda (packet)
-     (openrgb-with-process-buffer proc
-       (bindat-unpack type (alist-get 'payload packet))))))
+  (prog1
+      (promise-then
+       (openrgb--pop-packet proc #'openrgb-packet-has-id id)
+       (lambda (packet)
+         (openrgb-with-process-buffer proc
+           (bindat-unpack type (alist-get 'payload packet)))))
+    (openrgb-log proc 'trace "Receiver enqueued for id=%s" id)))
 
 (defun openrgb--proc-send (proc id device value type)
   "Send a message to PROC, with payload VALUE of TYPE.
 
 ID is the packet identifier to send with, and DEVICE is the
 device index to include."
+  (openrgb-log proc 'trace "Sending packet id=%s" id)
   (openrgb-with-process-buffer proc
     (let* ((packed (bindat-pack type value))
            (header (bindat-pack
@@ -75,13 +89,31 @@ device index to include."
 (defun openrgb--restore-saved-bindings ()
   "Restore bindings saved in `openrgb--saved-bindings-alist'."
   (while openrgb--saved-bindings-alist
-    (let ((pair (pop openrgb--saved-bindings-alist)))
-      (set (car pair) (cdr pair)))))
+    (cl-destructuring-bind (sym . val)
+        (pop openrgb--saved-bindings-alist)
+      (set sym (append (symbol-value sym) val)))))
 
 (defvar-local openrgb-packet-callbacks nil
   "List of callbacks to call with PACKET when a packet is enqueued.")
-(defvar-local openrgb-packet-handled nil
-  "Set to non-nil if the packet in `openrgb-packet-callbacks' has been handled.")
+
+(defvar-local openrgb--packet-handled nil
+  "An alist set by a packet callback.
+
+nil if unhandled, contains `remove' to remove, `consume' to stop
+iteration.")
+
+(defun openrgb-handle-packet (&optional remove consume)
+  "From a packet callback, mark the packet as handled by this callback.
+
+If REMOVE is non-nil, also remove this callback from the callback
+list."
+  (setq
+   openrgb--packet-handled
+   (cond
+    ((and remove consume) '((remove . t) (consume . t)))
+    (remove '((remove . t)))
+    (consume '((consume . t)))
+    (t '((t))))))
 
 (defun openrgb--proc-log (proc level fmt &rest args)
   "Log a message in PROC's buffer, at LEVEL, as if by `(format FMT &rest ARGS)'."
@@ -107,12 +139,39 @@ device index to include."
           level-name
           (string-trim (apply #'format fmt args))))))))
 
+(defmacro openrgb--del-if (list form)
+  "Delete elements of LIST for which FORM is non-nil, in-place.
+
+The symbol `it' is bound within FORM, and `break' can be set to
+break early."
+  (declare (indent 1) (debug t))
+  (cl-destructuring-bind (head prev-link tail) (mapcar #'gensym '("head" "prev-link" "tail"))
+    `(let* ((,head ,list) (,prev-link nil) (,tail ,head) (break nil))
+       (while (and ,tail (not break))
+         (if (let ((it (car ,tail))) ,form)
+             (setf (if ,prev-link (cdr ,prev-link) ,head)
+                   (cdr ,tail))
+           (setq ,prev-link ,tail))
+         (pop ,tail))
+       ,head)))
+
 (defun openrgb--enqueue-packet (packet)
   "Enqueue PACKET in the current buffer, signal waiters."
-  (let ((openrgb-packet-handled nil))
-    (dolist (fun openrgb-packet-callbacks)
-      (funcall fun packet))
-    (unless openrgb-packet-handled
+  (let ((nhandled 0))
+    (setq
+     openrgb-packet-callbacks
+     (openrgb--del-if openrgb-packet-callbacks
+       (progn
+         (let ((openrgb--packet-handled nil))
+           (funcall it packet)
+           (when openrgb--packet-handled
+             (setq nhandled (1+ nhandled))
+             (when (alist-get 'consume openrgb--packet-handled)
+               (setq break t))
+             (alist-get 'remove openrgb--packet-handled))))))
+    (openrgb-log nil 'trace "Packet handled by %s callback(s), %s remaining"
+                 nhandled (length openrgb-packet-callbacks))
+    (when (= nhandled 0)
       (openrgb-log nil 'error "Unhandled packet, id: %s" (alist-get 'id packet)))))
 
 (defun openrgb--pop-packet (proc pred &rest args)
@@ -124,17 +183,25 @@ This must be called before the packet could possibly be enqueued,
 otherwise it may be dropped.
 
 Returns an appropriate `promise'."
-  (promise-new
-   (lambda (resolve _reject)
-     (openrgb-with-process-buffer proc
-       (letrec ((callback
-                 (lambda (packet)
-                   (when (apply pred packet args)
-                     (setq openrgb-packet-handled t)
-                     (funcall resolve packet)
-                     (setq openrgb-packet-callbacks
-                           (delq callback openrgb-packet-callbacks))))))
-         (push callback openrgb-packet-callbacks))))))
+  (let (resolve value)
+    (setq resolve (lambda (it) (setq value it)))
+    (openrgb-with-process-buffer proc
+      (setq
+       openrgb-packet-callbacks
+       (nconc
+        openrgb-packet-callbacks
+        (list
+         (lambda (packet)
+           (when (apply pred packet args)
+             (openrgb-handle-packet t t)
+             (funcall resolve packet)))))))
+
+    (promise-new
+     (lambda (resolve-f reject)
+       (ignore reject)
+       (if value
+           (funcall resolve-f value)
+         (setq resolve resolve-f))))))
 
 (defun openrgb--try-enqueue-packet ()
   "Try to enqueue a packet in the current buffer, if any are available.
@@ -193,14 +260,15 @@ See `set-process-sentinel'."
   (openrgb-log proc 'info "%s" change))
 
 (defun openrgb--make-network-process (buf host port)
+  "Make the network process in BUF with HOST and PORT as options."
   (with-current-buffer buf
     (setq openrgb--current-proto-version 0)
     (setq openrgb--process-connect-options (list host port))
     (make-network-process
      :name "openrgb"
      :buffer buf
-     :host (or host 'local)
-     :service (or port 6742)
+     :host (or host openrgb-default-host)
+     :service (or port openrgb-default-port)
      :coding 'no-conversion
      :filter #'openrgb--process-filter
      :sentinel #'openrgb--process-sentinel

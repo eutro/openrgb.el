@@ -78,13 +78,15 @@ Sends the packet to SERVER, an `openrgb-process-p'.
                  (or (plist-get spec :doc)
                      "Undocumented.")
                  (if resp
-                     (let ((desc (openrgb-describe-bindat-type resp)))
-                       (format
-                        "Returns a `promise' with the result, which is %s%s"
-                        desc
-                        (if (s-contains? "\n" desc)
-                            ""
-                          ".")))
+                     (let* ((desc (openrgb-describe-bindat-type resp))
+                            (is-multiline (s-contains? "\n" desc))
+                            (doc
+                             (format
+                              "Returns a `promise-class' with the result, which is %s%s"
+                              desc
+                              (if is-multiline "" "."))))
+                       (if is-multiline doc
+                         (string-fill doc 80)))
                    "Returns nil, as there is no response from the server.")))
            (id (or (plist-get spec :id) (error "No `:id' provided")))
            (type (or (plist-get spec :type) (error "No `:type' provided")))
@@ -135,21 +137,7 @@ Sends the packet to SERVER, an `openrgb-process-p'.
   :device t
   :value `((version . ,(openrgb-current-proto-ver)))
   :type ((version . (openrgb-version 1 (uint 32 t))))
-  :resp
-  (openrgb-prefix-length
-   (openrgb-omit-keys
-    (num-modes)
-    (type sint 32 t)
-    (name openrgb-string)
-    (vendor . (openrgb-version 1 (openrgb-string)))
-    (description openrgb-string)
-    (version openrgb-string)
-    (serial openrgb-string)
-    (location openrgb-string)
-    (num-modes uint 16 t) (active-mode uint 32 t) (modes vec num-modes openrgb-mode)
-    (zones openrgb-seq vec openrgb-zone)
-    (leds openrgb-seq vec openrgb-led)
-    (colors openrgb-seq vec openrgb-color))))
+  :resp (openrgb-controller-data))
 
 (define-openrgb-packet openrgb-request-protocol-version (version)
   :doc "Request the protocol version, telling the server that ours is VERSION."
@@ -211,7 +199,7 @@ Sends the packet to SERVER, an `openrgb-process-p'.
    (openrgb-seq vec openrgb-color)))
 
 (define-openrgb-packet openrgb-rgbcontroller-updatezoneleds (zone colors)
-  :doc "Set all the lights on DEVICE of ZONE to COLORS."
+  :doc "Set all the lights on DEVICE's ZONE to COLORS."
   :id 1051
   :device t
   :value `((zone . ,zone) (colors . ,colors))
@@ -238,7 +226,7 @@ This calls `RGBController::setCustomMode' in C++.  I do not know what it does."
   :type (unit t))
 
 (define-openrgb-packet openrgb-rgbcontroller-updatemode (mode-idx mode-data)
-  :doc "Update DEVICE\=s MODE-IDXth mode to be MODE-DATA.
+  :doc "Update DEVICE\\='s MODE-IDXth mode to be MODE-DATA.
 
 See `openrgb-mode-type' for the layout of MODE-DATA."
   :id 1101
@@ -251,7 +239,7 @@ See `openrgb-mode-type' for the layout of MODE-DATA."
     (mode-data openrgb-mode))))
 
 (define-openrgb-packet openrgb-rgbcontroller-savemode (mode-idx mode)
-  :doc "Update and save DEVICE\=s MODE-IDXth mode to be MODE-DATA.
+  :doc "Update and save DEVICE\\='s MODE-IDXth mode to be MODE-DATA.
 
 See `openrgb-mode-type' for the layout of MODE-DATA."
   :id 1102

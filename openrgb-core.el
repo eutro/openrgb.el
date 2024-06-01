@@ -57,7 +57,7 @@
                  (const :tag "Error" 0)
                  (const :tag "Info" 1)
                  (const :tag "Debug" 2)
-                 (const :tag "Trace" 2))
+                 (const :tag "Trace" 3))
   :group 'openrgb)
 
 (defun openrgb-can-log (level)

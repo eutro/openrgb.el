@@ -33,6 +33,7 @@
 (require 'cl-lib)
 (require 'dash)
 (require 's)
+(require 'openrgb-constants)
 
 (eval-and-compile
   (defun openrgb-describe-bindat-type (body &optional plural)
@@ -60,14 +61,20 @@ Return a pluralised string if PLURAL is non-nil."
                 "a vector of %s")
               (openrgb-describe-bindat-type (cdr args) t)))
         ((str strz openrgb-string) (if plural "strings" "a string"))
+        (openrgb-enum
+         (format
+          "%senum %s, see `%s'"
+          (if plural "" "an ")
+          (if plural "constants" "constant")
+          (car args)))
         (openrgb-seq (openrgb-describe-bindat-type `(,(car args) 0 ,@(cdr args)) plural))
         (openrgb-prefix-length (openrgb-describe-bindat-type (car args) plural))
         (openrgb-omit-keys
-         (openrgb-describe-bindat-type
-          (--remove
-           (memq (car it) (car args))
-           (cdr args))
-          plural))
+            (openrgb-describe-bindat-type
+             (--remove
+              (memq (car it) (car args))
+              (cdr args))
+             plural))
         (openrgb-version
          (format "%s (only protocol version %s and up)"
                  (openrgb-describe-bindat-type (cadr args) plural)
@@ -189,6 +196,7 @@ definable at the top-level."
     `(struct
       (,v ,@type)
       :unpack-val (--remove (memq (car it) ',keys) ,v))))
+(put 'openrgb-omit-keys 'lisp-indent-function 1)
 
 (defconst openrgb-header-size 16)
 (define-openrgb-type openrgb-header
@@ -224,11 +232,21 @@ definable at the top-level."
   (val openrgb-seq str :pack-val (s-append "\0" v))
   :unpack-val (openrgb--string-strip-nullterm val))
 
+(bindat-defmacro openrgb-enum (name)
+  "A uint32 that's actually an enum defined in `openrgb-constants'."
+  (ignore name)
+  (let ((to-int (intern (format "%s-to-int" name)))
+        (from-int (intern (format "%s-from-int" name))))
+    `(struct
+      :pack-var v
+      (val uint 32 t :pack-val (,to-int v))
+      :unpack-val (,from-int val))))
+
 (define-openrgb-type openrgb-mode
   "an OpenRGB mode struct" "OpenRGB mode structs"
   (name openrgb-string)
   (value sint 32 t)
-  (flags uint 32 t)
+  (flags openrgb-enum openrgb-mode-flags)
   (speed-min uint 32 t) (speed-max uint 32 t)
   (brightness-min . (openrgb-version 3 (uint 32 t)))
   (brightness-max . (openrgb-version 3 (uint 32 t)))
@@ -236,13 +254,14 @@ definable at the top-level."
   (speed uint 32 t)
   (brightness . (openrgb-version 3 (uint 32 t)))
   (direction uint 32 t)
-  (color-mode uint 32 t)
+  (color-mode openrgb-enum openrgb-mode-color-types)
   (colors openrgb-seq vec openrgb-color))
 
 (define-openrgb-type openrgb-zone
   "an OpenRGB zone struct" "OpenRGB zone structs"
+  openrgb-omit-keys (matrix-len)
   (name openrgb-string)
-  (type sint 32 t)
+  (type openrgb-enum openrgb-zone-types)
   (leds-min uint 32 t) (leds-max uint 32 t)
   (leds-count uint 32 t)
   (matrix-len uint 16 t)
@@ -256,6 +275,22 @@ definable at the top-level."
   "an OpenRGB LED struct" "OpenRGB LEDs"
   (name openrgb-string)
   (value uint 32 t))
+
+(define-openrgb-type openrgb-controller-data
+  "data for an OpenRGB controller" "data for an OpenRGB controller"
+  openrgb-prefix-length
+  (openrgb-omit-keys (num-modes)
+    (type openrgb-enum openrgb-device-types)
+    (name openrgb-string)
+    (vendor . (openrgb-version 1 (openrgb-string)))
+    (description openrgb-string)
+    (version openrgb-string)
+    (serial openrgb-string)
+    (location openrgb-string)
+    (num-modes uint 16 t) (active-mode uint 32 t) (modes vec num-modes openrgb-mode)
+    (zones openrgb-seq vec openrgb-zone)
+    (leds openrgb-seq vec openrgb-led)
+    (colors openrgb-seq vec openrgb-color)))
 
 (provide 'openrgb-types)
 ;;; openrgb-types.el ends here

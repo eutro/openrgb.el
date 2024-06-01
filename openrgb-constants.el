@@ -45,25 +45,29 @@ which perform the conversions to/from symbols."
          (defconst ,name ',symbols
            ,(format "%s
 
-These enum constants can be converted to and from integers using
-`%s'and `%s'."
+These symbols constants can be converted to and from integers using
+`%s' and `%s'."
                     doc enum-to-int enum-from-int))
          (defun ,enum-to-int (symbol)
            ,(format "Convert SYMBOL from %s to an integer.
 
-Returns nil if it is not a valid symbol.
+Returns nil if it is not a valid enum constant.
 
 %s"
                     name valid-symbols-doc)
-           (--some (when (eq it symbol) it-index) ,name))
+           (cond
+            ((symbolp symbol) (--some (when (eq it symbol) it-index) ,name))
+            ((and (consp symbol) (eq 'unknown (car symbol))) (cdr symbol))
+            (t (error "Bad value"))))
          (defun ,enum-from-int (n)
            ,(format "Convert N to a symbol from %s.
 
-Returns `unknown' if the value is unrecognised.
+Returns (unknown . N) if the value is unrecognised.
 
 %s"
                     name valid-symbols-doc)
-           (or (--find (eq it-index n) ,name) 'unknown))))))
+           (or (--find (eq it-index n) ,name)
+               (cons 'unknown n)))))))
 
 ;; constants from https://gitlab.com/CalcProgrammer1/OpenRGB/-/blob/master/RGBController/RGBController.h
 ;; checked at revision 42542b6b676738c793bb2a84258498c6fe96e8ac
@@ -79,21 +83,20 @@ Returns `unknown' if the value is unrecognised.
 (define-openrgb-enum openrgb-mode-color-types
   "OpenRGB mode color type constants."
   none                        ; Mode has no colors
-  per-led                     ; Mode has per LED colors selecte
+  per-led                     ; Mode has per LED colors selected
   mode-specific               ; Mode specific colors selected
   random                      ; Mode has random colors selected
   )
 
 (define-openrgb-enum openrgb-device-types
   "OpenRGB device type constants."
-  motherboard dram gpu cooler ledstrip keyboard mouse mousemat headset headset_stand gamepad
+  motherboard dram gpu cooler ledstrip keyboard mouse mousemat headset headset-stand gamepad
   light speaker virtual storage case microphone accessory keypad)
 
-(define-openrgb-enum openrgb-mode-flag-idx
-  "OpenRGB mode flags by index.
+(define-openrgb-enum openrgb-mode-flag
+  "Singular OpenRGB mode flags, usually as a bit mask.
 
-These enum constants can be converted to and from bit masks using
-`openrgb-mode-flags-to-int' and `openrgb-mode-flags-from-int'."
+You likely want `openrgb-mode-flags'."
   has-speed                            ; Mode has speed parameter
   has-direction-lr                     ; Mode has left/right parameter
   has-direction-ud                     ; Mode has up/down parameter
@@ -106,13 +109,19 @@ These enum constants can be converted to and from bit masks using
   automatic-save                       ; Mode automatically saves
   )
 
+(defconst openrgb-mode-flags openrgb-mode-flag
+  "OpenRGB mode flags.
+
+Lists of these symbols can be converted to and from bit masks using
+`openrgb-mode-flags-to-int' and `openrgb-mode-flags-from-int'.")
+
 (defun openrgb-mode-flags-to-int (symbols)
   "Convert a list of `openrgb-mode-flag-idx' SYMBOLS to a bit-mask integer."
   (--reduce-from
    (logior
     acc
     (ash 1
-         (or (openrgb-mode-flag-idx-to-int it)
+         (or (openrgb-mode-flag-to-int it)
              (error "Not a valid flag: %s" it))))
    0
    symbols))
@@ -120,13 +129,19 @@ These enum constants can be converted to and from bit masks using
 (defun openrgb-mode-flags-from-int (mask)
   "Convert a bit-mask MASK to a list of `openrgb-mode-flag-idx' symbols."
   (cl-assert (<= 0 mask))
-  (let ((syms openrgb-mode-flag-idx)
+  (let ((syms openrgb-mode-flag)
+        (idx 0)
         ret)
-    (while (and (< 0 mask) syms)
+    (while (< 0 mask)
       (unless (zerop (logand mask 1))
-        (push (car syms) ret))
+        (push
+         (if syms
+             (car syms)
+           (cons 'unknown idx))
+         ret))
       (setq mask (ash mask -1))
-      (pop syms))
+      (pop syms)
+      (setq idx (1+ idx)))
     (unless (zerop mask)
       (push 'unknown ret))
     (nreverse ret)))
